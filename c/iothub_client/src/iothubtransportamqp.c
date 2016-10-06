@@ -1063,7 +1063,7 @@ static TRANSPORT_LL_HANDLE IoTHubTransportAMQP_Create(const IOTHUBTRANSPORT_CONF
         // Codes_SRS_IOTHUBTRANSPORTAMQP_09_009: [IoTHubTransportAMQP_Create shall fail and return NULL if memory allocation of the transport's internal state structure fails.]
         if ((transport_state = (AMQP_TRANSPORT_INSTANCE*)malloc(sizeof(AMQP_TRANSPORT_INSTANCE))) == NULL)
         {
-            LogError("Could not allocate AMQP transport state");
+            LogError("Could not allocate AMQP transport state (malloc failed)");
         }
         else
         {
@@ -1102,10 +1102,10 @@ static TRANSPORT_LL_HANDLE IoTHubTransportAMQP_Create(const IOTHUBTRANSPORT_CONF
                 LogError("Failed to set transport_state->iotHubHostFqdn.");
                 cleanup_required = true;
             }
-			// Codes_SRS_IOTHUBTRANSPORTAMQP_09_218: [IoTHubTransportAMQP_Create shall initialize the transport state registered device list with a VECTOR instance.]
+			// Codes_SRS_IOTHUBTRANSPORTAMQP_09_254: [IoTHubTransportAMQP_Create shall initialize the transport state registered device list with a VECTOR instance.]
 			else if ((transport_state->registered_devices = VECTOR_create(sizeof(IOTHUB_DEVICE_HANDLE))) == NULL)
 			{
-				// Codes_SRS_IOTHUBTRANSPORTAMQP_09_219: [If VECTOR_create fails, IoTHubTransportAMQP_Create shall fail and return.]
+				// Codes_SRS_IOTHUBTRANSPORTAMQP_09_255: [If VECTOR_create fails, IoTHubTransportAMQP_Create shall fail and return.]
 				LogError("Failed to initialize the internal list of registered devices");
 				cleanup_required = true;
 			}

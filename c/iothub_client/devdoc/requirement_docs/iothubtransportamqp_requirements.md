@@ -85,6 +85,10 @@ Summary of timeout parameters:
 
 The below requirements apply independent of the authentication method:
 
+**SRS_IOTHUBTRANSPORTAMQP_09_254: [**IoTHubTransportAMQP_Create shall initialize the transport state registered device list with a VECTOR instance.**]**
+
+**SRS_IOTHUBTRANSPORTAMQP_09_255: [**If VECTOR_create fails, IoTHubTransportAMQP_Create shall fail and return.**]**
+
 **SRS_IOTHUBTRANSPORTAMQP_09_236: [**If IoTHubTransportAMQP_Create fails it shall free any memory it allocated (iotHubHostFqdn, transport state).**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_09_023: [**If IoTHubTransportAMQP_Create succeeds it shall return a non-NULL pointer to the structure that represents the transport.**]**
