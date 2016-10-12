@@ -162,7 +162,7 @@
       <HintPath>$(SolutionDir)\packages\NSubstitute.1.10.0.0\lib\net45\NSubstitute.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="PCLCrypto, Version=1.0.0.0, Culture=neutral, PublicKeyToken=d4421c8a4786956c, processorArchitecture=MSIL">
+    <Reference Include="PCLCrypto">
       <HintPath>$(SolutionDir)\packages\PCLCrypto.1.0.86\lib\net40-Client\PCLCrypto.dll</HintPath>
       <Private>True</Private>
     </Reference>
