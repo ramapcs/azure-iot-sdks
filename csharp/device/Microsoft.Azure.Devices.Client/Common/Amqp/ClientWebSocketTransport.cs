@@ -53,6 +53,10 @@ namespace Microsoft.Azure.Amqp.Transport
             get { return true; }
         }
 
+        public override void SetMonitor(ITransportMonitor usageMeter)
+        {
+        }
+
         public override bool WriteAsync(TransportAsyncCallbackArgs args)
         {
             this.ThrowIfNotOpen();
