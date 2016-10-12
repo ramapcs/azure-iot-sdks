@@ -60,6 +60,10 @@ namespace Microsoft.Azure.Devices
             get { return true; }
         }
 
+        public override void SetMonitor(ITransportMonitor usageMeter)
+        {
+        }
+
         public override bool WriteAsync(TransportAsyncCallbackArgs args)
         {
             this.ThrowIfNotOpen();
