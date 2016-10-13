@@ -544,13 +544,9 @@ The remaining requirements apply independent of the authentication mode:
 
 **SRS_IOTHUBTRANSPORTAMQP_09_198: [**If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall save the value on the transport instance.**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_09_202: [**If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall apply it using connection_set_trace() to current connection instance if it exists and return IOTHUB_CLIENT_OK.**]**
+**SRS_IOTHUBTRANSPORTAMQP_09_202: [**If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall apply the bool value using connection_set_trace() to current connection instance if it exists and return IOTHUB_CLIENT_OK.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_09_203: [**If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall apply it using xio_setoption() to current SASL IO instance if it exists.**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_09_204: [**If xio_setoption() fails, IoTHubTransportAMQP_SetOption shall fail and return IOTHUB_CLIENT_ERROR.**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_09_205: [**If xio_setoption() succeeds, IoTHubTransportAMQP_SetOption shall return IOTHUB_CLIENT_OK.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_09_047: [**If the option name does not match one of the options handled by this module, IoTHubTransportAMQP_SetOption shall pass the value and name to the XIO using xio_setoption().**]**
 
@@ -559,5 +555,9 @@ The remaining requirements apply independent of the authentication mode:
 **SRS_IOTHUBTRANSPORTAMQP_09_207: [**If IoTHubTransportAMQP_SetOption fails creating the TLS IO instance, it shall fail and return IOTHUB_CLIENT_ERROR.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_09_208: [**When a new TLS IO instance is created, IoTHubTransportAMQP_SetOption shall apply the TLS I/O Options with OptionHandler_FeedOptions() if it is has any saved.**]**
+
+**SRS_IOTHUBTRANSPORTAMQP_09_204: [**If xio_setoption() fails, IoTHubTransportAMQP_SetOption shall fail and return IOTHUB_CLIENT_ERROR.**]**
+
+**SRS_IOTHUBTRANSPORTAMQP_09_205: [**If xio_setoption() succeeds, IoTHubTransportAMQP_SetOption shall return IOTHUB_CLIENT_OK.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_03_001: [**If xio_setoption fails,  IoTHubTransportAMQP_SetOption shall return IOTHUB_CLIENT_ERROR.**]**

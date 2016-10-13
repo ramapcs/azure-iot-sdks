@@ -63,6 +63,23 @@ typedef enum RESULT_TAG
 	RESULT_CRITICAL_ERROR
 } RESULT;
 
+typedef struct AMQP_TRANSPORT_CBS_CONNECTION_TAG
+{
+	// How long a SAS token created by the transport is valid, in milliseconds.
+	size_t sas_token_lifetime;
+	// Maximum period of time for the transport to wait before refreshing the SAS token it created previously, in milliseconds.
+	size_t sas_token_refresh_time;
+	// Maximum time the transport waits for uAMQP cbs_put_token() to complete before marking it a failure, in milliseconds.
+	size_t cbs_request_timeout;
+
+	// AMQP SASL I/O transport created on top of the TLS I/O layer.
+	XIO_HANDLE sasl_io;
+	// AMQP SASL I/O mechanism to be used.
+	SASL_MECHANISM_HANDLE sasl_mechanism;
+	// Connection instance with the Azure IoT CBS.
+	CBS_HANDLE cbs_handle;
+} AMQP_TRANSPORT_CBS_CONNECTION;
+
 typedef XIO_HANDLE(*TLS_IO_TRANSPORT_PROVIDER)(const char* fqdn, int port);
 
 typedef struct AMQP_TRANSPORT_STATE_TAG
@@ -86,7 +103,7 @@ typedef struct AMQP_TRANSPORT_STATE_TAG
 	// Current AMQP connection state;
 	AMQP_MANAGEMENT_STATE connection_state;
 
-	AMQP_TRANSPORT_CREDENTIAL_TYPE preferred_credential_type;
+	CREDENTIAL_TYPE preferred_credential_type;
 	// List of registered devices.
 	VECTOR_HANDLE registered_devices;
     // Turns logging on and off
@@ -103,7 +120,7 @@ typedef struct AMQP_TRANSPORT_DEVICE_STATE_TAG
 	// Identity of the device.
 	STRING_HANDLE deviceId;
 	// contains the credentials to be used
-	AUTHENTICATION_STATE_HANDLE authentication;
+	AUTHENTICATION_HANDLE authentication;
 
 	// Address to which the transport will connect to and send events.
 	STRING_HANDLE targetAddress;
@@ -499,8 +516,8 @@ static int establishConnection(AMQP_TRANSPORT_INSTANCE* transport_state)
 
         switch (transport_state->preferred_credential_type)
         {
-            case (DEVICE_KEY):
-            case (DEVICE_SAS_TOKEN):
+            case (CREDENTIAL_TYPE_DEVICE_KEY):
+            case (CREDENTIAL_TYPE_DEVICE_SAS_TOKEN):
             {
                 // Codes_SRS_IOTHUBTRANSPORTAMQP_09_056: [IoTHubTransportAMQP_DoWork shall create the SASL mechanism using AMQP's saslmechanism_create() API] 
                 if ((transport_state->cbs_connection.sasl_mechanism = saslmechanism_create(saslmssbcbs_get_interface(), NULL)) == NULL)
@@ -565,7 +582,7 @@ static int establishConnection(AMQP_TRANSPORT_INSTANCE* transport_state)
                 }
                 break;
             }
-            case(X509):
+            case(CREDENTIAL_TYPE_X509):
             {
                 /*Codes_SRS_IOTHUBTRANSPORTAMQP_02_006: [ IoTHubTransportAMQP_DoWork shall not establish a CBS connection. ]*/
                 /*Codes_SRS_IOTHUBTRANSPORTAMQP_02_005: [ IoTHubTransportAMQP_DoWork shall create the connection with the IoT service using connection_create2() AMQP API, passing the TLS I/O layer, IoT Hub FQDN and container ID as parameters (pass NULL for callbacks) ]*/
@@ -1002,7 +1019,7 @@ static void prepareForConnectionRetry(AMQP_TRANSPORT_INSTANCE* transport_state)
     transport_state->connection_state = AMQP_MANAGEMENT_STATE_IDLE;
 }
 
-static int is_credential_compatible(const IOTHUB_DEVICE_CONFIG* device_config, AMQP_TRANSPORT_CREDENTIAL_TYPE preferred_authentication_type)
+static int is_credential_compatible(const IOTHUB_DEVICE_CONFIG* device_config, CREDENTIAL_TYPE preferred_authentication_type)
 {
 	int result;
 
@@ -1010,12 +1027,12 @@ static int is_credential_compatible(const IOTHUB_DEVICE_CONFIG* device_config, A
 	{
 		result = RESULT_OK;
 	}
-	else if (preferred_authentication_type == X509 && (device_config->deviceKey != NULL || device_config->deviceSasToken != NULL))
+	else if (preferred_authentication_type == CREDENTIAL_TYPE_X509 && (device_config->deviceKey != NULL || device_config->deviceSasToken != NULL))
 	{
 		LogError("Incompatible credentials: transport is using X509 certificate authentication, but device config contains deviceKey and/or sasToken");
 		result = __LINE__;
 	}
-	else if (preferred_authentication_type != X509 && (device_config->deviceKey == NULL && device_config->deviceSasToken == NULL))
+	else if (preferred_authentication_type != CREDENTIAL_TYPE_X509 && (device_config->deviceKey == NULL && device_config->deviceSasToken == NULL))
 	{
 		LogError("Incompatible credentials: transport is using CBS authentication, but device config does not contain deviceKey nor sasToken");
 		result = __LINE__;
@@ -1381,7 +1398,7 @@ static IOTHUB_CLIENT_RESULT IoTHubTransportAMQP_SetOption(TRANSPORT_LL_HANDLE ha
 
             if (transport_state->connection != NULL)
             {
-				// Codes_SRS_IOTHUBTRANSPORTAMQP_09_202: [If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall apply it using connection_set_trace() to current connection instance if it exists and return IOTHUB_CLIENT_OK.]
+				// Codes_SRS_IOTHUBTRANSPORTAMQP_09_202: [If `optionName` is `logtrace`, IoTHubTransportAMQP_SetOption shall apply the bool value using connection_set_trace() to current connection instance if it exists and return IOTHUB_CLIENT_OK.]
                 connection_set_trace(transport_state->connection, transport_state->is_trace_on);
             }
 
@@ -1409,9 +1426,9 @@ static IOTHUB_CLIENT_RESULT IoTHubTransportAMQP_SetOption(TRANSPORT_LL_HANDLE ha
 			{
 				if (transport_state->preferred_credential_type == CREDENTIAL_NOT_BUILD)
 				{
-					transport_state->preferred_credential_type = X509;
+					transport_state->preferred_credential_type = CREDENTIAL_TYPE_X509;
 				}
-				else if (transport_state->preferred_credential_type != X509)
+				else if (transport_state->preferred_credential_type != CREDENTIAL_TYPE_X509)
 				{
 					LogError("x509certificate specified, but authentication method is not x509");
 					result = IOTHUB_CLIENT_INVALID_ARG;
@@ -1422,9 +1439,9 @@ static IOTHUB_CLIENT_RESULT IoTHubTransportAMQP_SetOption(TRANSPORT_LL_HANDLE ha
 			{
 				if (transport_state->preferred_credential_type == CREDENTIAL_NOT_BUILD)
 				{
-					transport_state->preferred_credential_type = X509;
+					transport_state->preferred_credential_type = CREDENTIAL_TYPE_X509;
 				}
-				else if (transport_state->preferred_credential_type != X509)
+				else if (transport_state->preferred_credential_type != CREDENTIAL_TYPE_X509)
 				{
 					LogError("x509privatekey specified, but authentication method is not x509");
 					result = IOTHUB_CLIENT_INVALID_ARG;

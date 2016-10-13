@@ -13,7 +13,6 @@
 #include "azure_c_shared_utility/sastoken.h"
 #include "azure_c_shared_utility/xio.h"
 #include "azure_uamqp_c/cbs.h"
-#include "azure_uamqp_c/sasl_mechanism.h"
 #include "iothub_transport_ll.h" 
 
 #ifdef __cplusplus 
@@ -21,51 +20,41 @@ extern "C"
 { 
 #endif 
 
-typedef struct AMQP_TRANSPORT_CBS_CONNECTION_TAG
-{
-	// How long a SAS token created by the transport is valid, in milliseconds.
-	size_t sas_token_lifetime;
-	// Maximum period of time for the transport to wait before refreshing the SAS token it created previously, in milliseconds.
-	size_t sas_token_refresh_time;
-	// Maximum time the transport waits for  uAMQP cbs_put_token() to complete before marking it a failure, in milliseconds.
-	size_t cbs_request_timeout;
-
-	// AMQP SASL I/O transport created on top of the TLS I/O layer.
-	XIO_HANDLE sasl_io;
-	// AMQP SASL I/O mechanism to be used.
-	SASL_MECHANISM_HANDLE sasl_mechanism;
-	// Connection instance with the Azure IoT CBS.
-	CBS_HANDLE cbs_handle;
-} AMQP_TRANSPORT_CBS_CONNECTION;
-
 typedef struct AUTHENTICATION_CONFIG_TAG
 {
 	const char* device_id;
 	const char* device_key;
 	const char* device_sas_token;
 	const char* iot_hub_host_fqdn;
-	const AMQP_TRANSPORT_CBS_CONNECTION* cbs_connection;
 
 } AUTHENTICATION_CONFIG;
 
 typedef enum AUTHENTICATION_STATUS_TAG 
 {
-	AUTHENTICATION_STATUS_IDLE, 
-	AUTHENTICATION_STATUS_IN_PROGRESS, 
-	AUTHENTICATION_STATUS_TIMEOUT,
-	AUTHENTICATION_STATUS_REFRESH_REQUIRED,
-	AUTHENTICATION_STATUS_FAILURE, 
-	AUTHENTICATION_STATUS_OK,
-	AUTHENTICATION_STATUS_NONE
+	AUTHENTICATION_STATUS_NONE,
+	AUTHENTICATION_STATUS_IDLE,
+	AUTHENTICATION_STATUS_STARTED,
+	AUTHENTICATION_STATUS_AUTHENTICATING,
+	AUTHENTICATION_STATUS_AUTHENTICATED,
+	AUTHENTICATION_STATUS_REFRESHING,
+	AUTHENTICATION_STATUS_DEAUTHENTICATING,
+	AUTHENTICATION_STATUS_FAILED, 
+	AUTHENTICATION_STATUS_FAILED_TIMEOUT
 } AUTHENTICATION_STATUS; 
  
-typedef enum AMQP_TRANSPORT_CREDENTIAL_TYPE_TAG 
+typedef enum DELETE_SAS_TOKEN_RESULT_TAG
+{
+	DELETE_SAS_TOKEN_RESULT_SUCCESS,
+	DELETE_SAS_TOKEN_RESULT_ERROR
+} DELETE_SAS_TOKEN_RESULT;
+
+typedef enum CREDENTIAL_TYPE_TAG 
 { 
-	CREDENTIAL_NOT_BUILD, 
-	X509, 
-	DEVICE_KEY, 
-	DEVICE_SAS_TOKEN, 
-} AMQP_TRANSPORT_CREDENTIAL_TYPE; 
+	CREDENTIAL_TYPE_NONE,
+	CREDENTIAL_TYPE_X509, 
+	CREDENTIAL_TYPE_DEVICE_KEY, 
+	CREDENTIAL_TYPE_DEVICE_SAS_TOKEN, 
+} CREDENTIAL_TYPE; 
  
 typedef struct X509_CREDENTIAL_TAG 
 { 
@@ -73,7 +62,7 @@ typedef struct X509_CREDENTIAL_TAG
 	const char* x509privatekey; 
 } X509_CREDENTIAL; 
  
-typedef union AMQP_TRANSPORT_CREDENTIAL_DATA_TAG 
+typedef union CREDENTIAL_DATA_TAG 
 { 
 	// Key associated to the device to be used. 
 	STRING_HANDLE deviceKey; 
@@ -81,71 +70,73 @@ typedef union AMQP_TRANSPORT_CREDENTIAL_DATA_TAG
 	// SAS associated to the device to be used. 
 	STRING_HANDLE deviceSasToken; 
  
-	// X509  
+	// CREDENTIAL_TYPE_X509  
 	X509_CREDENTIAL x509credential; 
-} AMQP_TRANSPORT_CREDENTIAL_DATA; 
+} CREDENTIAL_DATA; 
  
 typedef struct AMQP_TRANSPORT_CREDENTIAL_TAG 
 { 
-	AMQP_TRANSPORT_CREDENTIAL_TYPE type; 
-	AMQP_TRANSPORT_CREDENTIAL_DATA data; 
-} AMQP_TRANSPORT_CREDENTIAL; 
+	CREDENTIAL_TYPE type; 
+	CREDENTIAL_DATA data; 
+} DEVICE_CREDENTIAL; 
 
-struct AUTHENTICATION_STATE;
-typedef struct AUTHENTICATION_STATE* AUTHENTICATION_STATE_HANDLE;
+typedef void(*ON_AUTHENTICATION_STOP_COMPLETED)(DELETE_SAS_TOKEN_RESULT result, void* context);
+typedef void(*ON_AUTHENTICATION_STATUS_CHANGED)(void* context, AUTHENTICATION_STATUS* old_status, AUTHENTICATION_STATUS* new_status);
+
+typedef struct AUTHENTICATION_STATE* AUTHENTICATION_HANDLE;
  
 /** @brief Creates a state holder for all authentication-related information and connections. 
 * 
-*   @returns an instance of the AUTHENTICATION_STATE_HANDLE if succeeds, NULL if any failure occurs. 
+*   @returns an instance of the AUTHENTICATION_HANDLE if succeeds, NULL if any failure occurs. 
 */ 
-extern AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config);
- 
-/** @brief Establishes the first authentication for the device in the transport it is registered to. 
-* 
-* @details If SAS token or key are used, creates a cbs instance for the transport if it does not have one,  
-*            and puts a SAS token in (creates one if key is used, or applies the SAS token if provided by user). 
-*            If certificates are used, they are set on the tls_io instance of the transport. 
-* 
-*   @returns 0 if it succeeds, non-zero if it fails. 
-*/ 
-extern int authentication_authenticate(AUTHENTICATION_STATE_HANDLE authentication_state); 
- 
-/** @brief Indicates if the device is authenticated successfuly, if authentication is in progress or completed with failure. 
-* 
-*   @returns A flag indicating the current authentication status of the device. 
-*/ 
-extern AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_STATE_HANDLE authentication_state); 
+extern AUTHENTICATION_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config);
 
-/** @brief Gets the credential stored by the handle for authenticating the device.
+/** @brief Gets the type of the credential the state was set to use.
 *
-*   @returns A AMQP_TRANSPORT_CREDENTIAL with the credentials type and data.
+*   @returns If succeeds, returns 0 and an CREDENTIAL_TYPE indicating the credential type, or non-zero if it fails.
 */
-extern AMQP_TRANSPORT_CREDENTIAL* authentication_get_credential(AUTHENTICATION_STATE_HANDLE authentication_state);
+extern int authentication_get_credential_type(AUTHENTICATION_HANDLE authentication_handle, CREDENTIAL_TYPE* type);
 
-/** @brief Refreshes the authentication if needed. 
+/** @brief Prepares the state to authenticate a device. 
 * 
-* @details If SAS key is used, a new token is generated and put to cbs if the previous generated token is expired. 
+*	@details Causes the state to store the CBS_HANDLE to be used, and the callbacks to be fired on state changes.
 * 
 *   @returns 0 if it succeeds, non-zero if it fails. 
 */ 
-extern int authentication_refresh(AUTHENTICATION_STATE_HANDLE authentication_state); 
+extern int authentication_start(AUTHENTICATION_HANDLE authentication_handle, const CBS_HANDLE cbs_handle, ON_AUTHENTICATION_STATUS_CHANGED on_status_changed, const void* context);
 
-/** @brief Resets the state of the authentication.
+/** @brief De-authenticates without destroying the authentication state. 
+* 
+*   @details A SAS token delete command is sent to the CBS if needed, and the CBS_HANDLE is then discarded by the state. 
+* 
+*   @returns 0 if it succeeds, non-zero if it fails. 
+*/ 
+extern int authentication_stop(AUTHENTICATION_HANDLE authentication_handle, ON_AUTHENTICATION_STOP_COMPLETED on_stop_completed, const void* context);
+
+/** @brief Causes the authentication state to authenticate, refresh SAS token, compute timeouts, trigger saved callbacks.
 *
-* @details Causes the status of the authentication state to be reset to IDLE (similar to when the state is created).
+*   @details This must be called frequently for the authentication state to process properly.
 *
 *   @returns 0 if it succeeds, non-zero if it fails.
 */
-extern int authentication_reset(AUTHENTICATION_STATE_HANDLE authentication_state);
+extern int authentication_do_work(AUTHENTICATION_HANDLE authentication_handle);
+
+/** @brief Sets options on the authentication state.
+*
+*   @details Options supported: 
+*
+*   @returns 0 if it succeeds, non-zero if it fails.
+*/
+extern int authentication_set_option(AUTHENTICATION_HANDLE authentication_handle, const char* name, const void* value);
 
 /** @brief De-authenticates the device and destroy the state instance. 
 * 
-* @details Closes the subscription to cbs if in use, destroys the cbs instance if it is the last device registered. 
+*   @details Closes the subscription to cbs if in use, destroys the cbs instance if it is the last device registered. 
 *            No action is taken if certificate-based authentication if used. 
 * 
 *   @returns Nothing. 
 */ 
-extern void authentication_destroy(AUTHENTICATION_STATE_HANDLE authentication_state); 
+extern void authentication_destroy(AUTHENTICATION_HANDLE authentication_handle); 
  
 #ifdef __cplusplus 
 } 

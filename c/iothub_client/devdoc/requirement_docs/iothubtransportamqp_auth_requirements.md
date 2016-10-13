@@ -11,37 +11,71 @@ This module provides APIs for authenticating devices registered on the IoT Hub C
 
 
 ```c
-extern AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config);
+typedef struct AUTHENTICATION_CONFIG_TAG
+{
+	const char* device_id;
+	const char* device_key;
+	const char* device_sas_token;
+	const char* iot_hub_host_fqdn;
 
-extern int authentication_authenticate(AUTHENTICATION_STATE_HANDLE authentication_state);
+} AUTHENTICATION_CONFIG;
 
-extern AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_STATE_HANDLE authentication_state); 
+typedef enum AUTHENTICATION_STATUS_TAG 
+{
+	AUTHENTICATION_STATUS_NONE,
+	AUTHENTICATION_STATUS_IDLE,
+	AUTHENTICATION_STATUS_STARTED,
+	AUTHENTICATION_STATUS_AUTHENTICATING,
+	AUTHENTICATION_STATUS_AUTHENTICATED,
+	AUTHENTICATION_STATUS_REFRESHING,
+	AUTHENTICATION_STATUS_DEAUTHENTICATING,
+	AUTHENTICATION_STATUS_FAILED, 
+	AUTHENTICATION_STATUS_FAILED_TIMEOUT
+} AUTHENTICATION_STATUS; 
 
-extern AMQP_TRANSPORT_CREDENTIAL* authentication_get_credential(AUTHENTICATION_STATE_HANDLE authentication_state);
+typedef void(*ON_AUTHENTICATION_STOP_COMPLETED)(DELETE_SAS_TOKEN_RESULT result, void* context);
+typedef void(*ON_AUTHENTICATION_STATUS_CHANGED)(void* context, AUTHENTICATION_STATUS* old_status, AUTHENTICATION_STATUS* new_status);
 
-extern int authentication_refresh(AUTHENTICATION_STATE_HANDLE authentication_state); 
+typedef enum CREDENTIAL_TYPE_TAG 
+{ 
+	CREDENTIAL_TYPE_NONE,
+	CREDENTIAL_TYPE_X509, 
+	CREDENTIAL_TYPE_DEVICE_KEY, 
+	CREDENTIAL_TYPE_DEVICE_SAS_TOKEN, 
+} CREDENTIAL_TYPE; 
 
-extern int authentication_reset(AUTHENTICATION_STATE_HANDLE authentication_state);
+typedef struct AUTHENTICATION_STATE* AUTHENTICATION_HANDLE;
 
-extern int authentication_destroy(AUTHENTICATION_STATE_HANDLE authentication_state);
+
+extern AUTHENTICATION_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config);
+
+extern void authentication_do_work(AUTHENTICATION_HANDLE authentication_handle);
+
+extern int authentication_start(AUTHENTICATION_HANDLE authentication_handle, const CBS_HANDLE cbs_handle, ON_AUTHENTICATION_STATUS_CHANGED on_status_changed, const void* context);
+
+extern int authentication_stop(AUTHENTICATION_HANDLE authentication_handle, ON_AUTHENTICATION_STOP_COMPLETED on_stop_completed, const void* context);
+
+extern int authentication_get_credential_type(AUTHENTICATION_HANDLE authentication_handle, CREDENTIAL_TYPE* type);
+
+extern int authentication_set_option(AUTHENTICATION_HANDLE authentication_handle, const char* name, const void* value);
+
+extern int authentication_destroy(AUTHENTICATION_HANDLE authentication_handle);
 ```
 
 
 ### authentication_create
 
 ```c
-AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config)
+AUTHENTICATION_HANDLE authentication_create(const AUTHENTICATION_CONFIG* config)
 ```
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_001: [**If parameter config, config->device_id, config->iot_hub_host_fqdn or config->cbs_connection are NULL, authentication_create() shall fail and return NULL.**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_001: [**If parameter config, config->device_id or config->iot_hub_host_fqdn are NULL, authentication_create() shall fail and return NULL.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_002: [**authentication_create() shall allocate memory for a new authenticate state structure AUTHENTICATION_STATE.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_003: [**If malloc() fails, authentication_create() shall fail and return NULL.**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_004: [**authentication_create() shall set the initial status of AUTHENTICATION_STATE as AUTHENTICATION_STATUS_IDLE.**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_005: [**authentication_create() shall save a reference to the `cbs_connection` into the AUTHENTICATION_STATE instance.**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_004: [**authentication_create() shall set the initial status of AUTHENTICATION_STATE as AUTHENTICATION_STATUS_NONE.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_006: [**authentication_create() shall save a copy of `device_config->deviceId` into the AUTHENTICATION_STATE instance.**]**
 
@@ -60,8 +94,6 @@ AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* c
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_012: [**If `device_config->deviceSasToken` is not NULL, authentication_create() shall set the credential type in the AUTHENTICATION_STATE as DEVICE_SAS_TOKEN.**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_013: [**If the credential type is DEVICE_SAS_TOKEN or DEVICE_KEY and parameter cbs_connection is NULL, authentication_create() shall fail and return NULL**]**
-
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_014: [**If the credential type is DEVICE_SAS_TOKEN or DEVICE_KEY, authentication_create() shall set sasTokenKeyName in the AUTHENTICATION_STATE as a non-NULL empty string.**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_015: [**If STRING_new() fails and cannot create sasTokenKeyName, authentication_create() shall fail and return NULL**]**
@@ -76,11 +108,9 @@ AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* c
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_018: [**If `device_config->deviceKey` is not NULL, authentication_create() shall set the credential type in the AUTHENTICATION_STATE as DEVICE_KEY.**]**
 
 
-#### X509 authentication
+#### Unknown authentication
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_019: [**If `device_config->deviceKey` and `device_config->deviceSasToken` are NULL, authentication_create() shall set the credential type in the AUTHENTICATION_STATE as X509**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_020: [**If the credential type is X509 and parameter cbs_connection is not NULL, authentication_create() shall fail and return NULL**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_019: [**If `device_config->deviceKey` and `device_config->deviceSasToken` are NULL, authentication_create() shall fail and return**]**
 
 
 #### General
@@ -90,10 +120,10 @@ AUTHENTICATION_STATE_HANDLE authentication_create(const AUTHENTICATION_CONFIG* c
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_022: [**If no failure occurs, authentication_create() shall return a reference to the AUTHENTICATION_STATE handle**]**
 
 
-### authentication_authenticate
+### authentication_do_work
 
 ```c
-int authentication_authenticate(AUTHENTICATION_STATE_HANDLE authentication_state)
+void authentication_do_work(AUTHENTICATION_HANDLE authentication_handle)
 ```
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_023: [**If authentication_state is NULL, authentication_authenticate() shall fail and return an error code**]**
@@ -147,22 +177,17 @@ int authentication_authenticate(AUTHENTICATION_STATE_HANDLE authentication_state
 
 ##### cbs_put_token() callback (applicable to when authentication is done using DEVICE_KEY or DEVICE_SAS_TOKEN)
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_041: [**When cbs_put_token() calls back, if the result is CBS_OPERATION_RESULT_OK the state status shall be set to AUTHENTICATION_STATUS_OK**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_041: [**When cbs_put_token() calls back, if the result is CBS_OPERATION_RESULT_OK the state status shall be set to AUTHENTICATION_STATUS_AUTHENTICATED**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_042: [**When cbs_put_token() calls back, if the result is not CBS_OPERATION_RESULT_OK the state status shall be set to AUTHENTICATION_STATUS_FAILURE**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_042: [**When cbs_put_token() calls back, if the result is not CBS_OPERATION_RESULT_OK the state status shall be set to AUTHENTICATION_STATUS_FAILED**]**
 
-
-
-#### X509 authentication
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_043: [**If the credential type is X509, authentication_authenticate() shall not perform any authentication and return a success code**]**
 
 
 
 ### authentication_get_status
 
 ```c
-AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_STATE_HANDLE authentication_state)
+AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_HANDLE authentication_state)
 ```
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_044: [**If authentication_state is NULL, authentication_get_status() shall fail and return AUTHENTICATION_STATUS_NONE**]**
@@ -171,9 +196,9 @@ AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_STATE_HANDLE auth
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_046: [**The authentication timeout shall be computed comparing the last time a SAS token was put (`current_sas_token_put_time`) to `cbs_request_timeout`**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_047: [**If authentication has timed out, authentication_get_status() shall set the status of the state to AUTHENTICATION_STATUS_TIMEOUT**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_047: [**If authentication has timed out, authentication_get_status() shall set the status of the state to AUTHENTICATION_STATUS_FAILED_TIMEOUT**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_048: [**If the credential type is DEVICE_KEY and current status is AUTHENTICATION_STATUS_OK, authentication_get_status() shall check if SAS token must be refreshed**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_048: [**If the credential type is DEVICE_KEY and current status is AUTHENTICATION_STATUS_AUTHENTICATED, authentication_get_status() shall check if SAS token must be refreshed**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_049: [**The SAS token expiration shall be computed comparing its create time to `sas_token_refresh_time`**]**
 
@@ -183,41 +208,26 @@ AUTHENTICATION_STATUS authentication_get_status(AUTHENTICATION_STATE_HANDLE auth
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_052: [**The authentication timeout shall be computed comparing the last time the SAS token was put (`current_sas_token_put_time`) to `cbs_request_timeout`**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_053: [**If authentication has timed out, authentication_get_status() shall set the status of the state to AUTHENTICATION_STATUS_TIMEOUT**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_053: [**If authentication has timed out, authentication_get_status() shall set the status of the state to AUTHENTICATION_STATUS_FAILED_TIMEOUT**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_054: [**After checks and updates, authentication_get_status() shall return the status saved on the AUTHENTICATION_STATE**]**
 
 
-### authentication_get_credential
+### authentication_get_credential_type
 
 ```c
-AMQP_TRANSPORT_CREDENTIAL* authentication_get_credential(AUTHENTICATION_STATE_HANDLE authentication_state)
+int authentication_get_credential_type(AUTHENTICATION_HANDLE authentication_handle, CREDENTIAL_TYPE* type)
 ```
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_055: [**If authentication_state is not NULL, authentication_get_credential() shall return a reference to credentials saved in the AUTHENTICATION_STATE**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_055: [**If authentication_state is NULL, authentication_get_credential_type() shall fail and return NONE**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_056: [**If authentication_state is NULL, authentication_get_credential() shall fail and return NULL**]**
-
-
-### authentication_refresh
-
-```c
-int authentication_refresh(AUTHENTICATION_STATE_HANDLE authentication_state)
-```
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_057: [**If authentication_state is NULL, authentication_refresh() shall fail and return error code**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_058: [**If the credential type is X509, authentication_refresh() shall return with success code 0**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_059: [**authentication_refresh() shall invoke authentication_authenticate(), passing the authentication_state handle**]**
-
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_060: [**if authentication_authenticate() fails, authentication_refresh() shall fail and return an error code**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_056: [**If authentication_state is not NULL, authentication_get_credential_type() shall return the type of the credential**]**
 
 
 ### authentication_reset
 
 ```c
-int authentication_reset(AUTHENTICATION_STATE_HANDLE authentication_state)
+int authentication_reset(AUTHENTICATION_HANDLE authentication_state)
 ```
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_061: [**If authentication_state is NULL, authentication_reset() shall fail and return an error code**]**
@@ -227,13 +237,13 @@ int authentication_reset(AUTHENTICATION_STATE_HANDLE authentication_state)
 
 The following apply if the credential type is DEVICE_KEY or DEVICE_SAS_TOKEN:
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_063: [**If the authentication_state status is AUTHENTICATION_STATUS_FAILURE or AUTHENTICATION_STATUS_REFRESH_REQUIRED, authentication_reset() shall set the status to AUTHENTICATION_STATUS_IDLE**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_063: [**If the authentication_state status is AUTHENTICATION_STATUS_FAILED or AUTHENTICATION_STATUS_REFRESH_REQUIRED, authentication_reset() shall set the status to AUTHENTICATION_STATUS_IDLE**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_064: [**If the authentication_state status is AUTHENTICATION_STATUS_OK or AUTHENTICATION_STATUS_IN_PROGRESS, authentication_reset() delete the previous token using cbs_delete_token()**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_064: [**If the authentication_state status is AUTHENTICATION_STATUS_AUTHENTICATED or AUTHENTICATION_STATUS_IN_PROGRESS, authentication_reset() delete the previous token using cbs_delete_token()**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_065: [**If cbs_delete_token fails, authentication_reset() shall fail and return an error code**]**
 
-**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_066: [**If cbs_delete_token calls back with result different than CBS_OPERATION_RESULT_OK, authentication_reset() shall set the state status to AUTHENTICATION_STATUS_FAILURE**]**
+**SRS_IOTHUBTRANSPORTAMQP_AUTH_09_066: [**If cbs_delete_token calls back with result different than CBS_OPERATION_RESULT_OK, authentication_reset() shall set the state status to AUTHENTICATION_STATUS_FAILED**]**
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_067: [**If no error occurs, authentication_reset() shall return 0**]**
 
@@ -241,7 +251,7 @@ The following apply if the credential type is DEVICE_KEY or DEVICE_SAS_TOKEN:
 ### authentication_destroy
 
 ```c
-int authentication_destroy(AUTHENTICATION_STATE_HANDLE authentication_state)
+int authentication_destroy(AUTHENTICATION_HANDLE authentication_state)
 ```
 
 **SRS_IOTHUBTRANSPORTAMQP_AUTH_09_068: [**If authentication_state is NULL, authentication_destroy() shall fail and return**]**
